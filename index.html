@@ -84,7 +84,7 @@
       securityJsCode: "你的高德安全密钥"
     };
     const AMAP_KEY = "你的高德Web端Key";
-    const EDIT_PASSWORD = "000000"; // 编辑解锁密码
+    const EDIT_PASSWORD = "X28Q524Y"; // 编辑解锁密码
 
     const script = document.createElement('script');
     script.src = `https://webapi.amap.com/v2/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`;
@@ -192,7 +192,7 @@
     document.getElementById('editTrigger').addEventListener('click', () => {
       if (isEditMode) return;
       const pwd = prompt('请输入编辑密码：');
-      if (pwd === EDIT_PASSWORD) {
+      if (pwd === X28Q524Y) {
         isEditMode = true;
         editorPanel.classList.add('show');
       } else if (pwd !== null) {
