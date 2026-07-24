@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>班级蹭饭地图</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html, #container { width: 100%; height: 100%; }
+    #editor-panel {
+      display: none;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      z-index: 999;
+      width: 320px;
+      max-height: 80%;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    #editor-panel.show { display: block; }
+    .btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px 2px;
+    }
+    .btn-primary { background: #1a73e8; color: white; }
+    .btn-warning { background: #fbbc04; }
+    .btn-danger { background: #ea4335; color: white; }
+    .btn-success { background: #34a853; color: white; }
+    input[type="file"] { display: none; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 4px; text-align: left; }
+    th { background: #f2f2f2; }
+    .close-btn { float: right; cursor: pointer; font-size: 18px; }
+    .hidden-action {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 1000;
+      opacity: 0.3;
+      font-size: 12px;
+      cursor: default;
+      user-select: none;
+    }
+    /* 导航按钮样式 */
+    .nav-btn {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 5px 3px 0 0;
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 12px;
+      color: white;
+    }
+    .nav-amap { background: #0091ff; }
+    .nav-baidu { background: #3385ff; }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+
+  <div class="hidden-action" id="editTrigger" title="长按3秒进入编辑"> 编辑入口</div>
+
+  <div id="editor-panel">
+    <span class="close-btn" id="closeEditor">&times;</span>
+    <h3>✏️ 编辑同学数据</h3>
+    <p class="hint">上传CSV文件批量导入，或手动修改后导出网页</p>
+    <input type="file" id="csvFileInput" accept=".csv">
+    <button class="btn btn-primary" id="uploadBtn"> 选择CSV文件</button>
+    <button class="btn btn-success" id="applyBtn" style="display:none;">✅ 应用到地图</button>
+    <button class="btn btn-warning" id="exportBtn"> 下载更新后的网页</button>
+    <div id="previewTable"></div>
+  </div>
+
+  <script>
+    // 高德 Key 和安全密钥（请替换为你自己的）
+    window._AMapSecurityConfig = {
+      securityJsCode: "000000"
+    };
+    const AMAP_KEY = "你的Web端Key";
+
+    const EDIT_PASSWORD = "mysecret2024";
+
+    const script = document.createElement('script');
+    script.src = `https://webapi.amap.com/v2/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`;
+    document.head.appendChild(script);
+
+    let classmatesData = [
+      { name: "张三", contact: "138xxxx", college: "北京大学", address: "北京市海淀区颐和园路5号" },
+      { name: "李四", contact: "139xxxx", college: "复旦大学", address: "上海市杨浦区邯郸路220号" }
+    ];
+
+    let map = null, geocoder = null, markers = [];
+    let editorPanel = document.getElementById('editor-panel');
+
+    // 生成信息窗口内容（含导航按钮）
+    function generateInfoContent(markerData) {
+      const { name, college, contact, address, lng, lat } = markerData;
+      const amapUrl = `https://uri.amap.com/navigation?to=${lng},${lat},${encodeURIComponent(name)}&mode=car&coordinate=gaode`;
+      const baiduUrl = `https://api.map.baidu.com/direction?destination=${lat},${lng}&coord_type=gcj02&mode=driving&output=html&src=classmap`;
+      
+      return `
+        <div style="padding:8px; min-width:160px;">
+          <strong>${name}</strong><br/>
+           ${college}<br/>
+           ${address}<br/>
+           ${contact}<br/>
+          <div style="margin-top:8px;">
+            <a class="nav-btn nav-amap" href="${amapUrl}" target="_blank"> 高德导航</a>
+            <a class="nav-btn nav-baidu" href="${baiduUrl}" target="_blank"> 百度导航</a>
+          </div>
+        </div>
+      `;
+    }
+
+    function initMap() {
+      map = new AMap.Map('container', {
+        zoom: 5,
+        center: [104.0, 35.0],
+        resizeEnable: true
+      });
+      map.addControl(new AMap.Scale());
+      map.addControl(new AMap.ToolBar());
+
+      AMap.plugin('AMap.Geocoder', () => {
+        geocoder = new AMap.Geocoder({});
+        addMarkersFromData(classmatesData);
+      });
+    }
+
+    function addMarkersFromData(dataArray) {
+      clearMarkers();
+      if (!geocoder) return;
+      let loadedCount = 0;
+      dataArray.forEach((item, index) => {
+        if (!item.address) {
+          loadedCount++;
+          return;
+        }
+        geocoder.getLocation(item.address, (status, result) => {
+          loadedCount++;
+          if (status === 'complete' && result.geocodes.length > 0) {
+            const lnglat = result.geocodes[0].location;
+            const marker = new AMap.Marker({
+              position: [lnglat.lng, lnglat.lat],
+              title: item.name,
+              map: map
+            });
+            // 保存数据以便生成导航链接
+            const markerData = {
+              name: item.name,
+              college: item.college,
+              contact: item.contact,
+              address: item.address,
+              lng: lnglat.lng,
+              lat: lnglat.lat
+            };
+            const infoWindow = new AMap.InfoWindow({
+              content: generateInfoContent(markerData),
+              offset: new AMap.Pixel(0, -30)
+            });
+            marker.on('click', () => {
+              infoWindow.open(map, marker.getPosition());
+            });
+            markers.push(marker);
+
+            // 所有地理编码完成后调整视野
+            if (loadedCount === dataArray.length && markers.length > 0) {
+              map.setFitView();
+            }
+          } else {
+            console.warn('地址解析失败:', item.address);
+          }
+        });
+      });
+    }
+
+    function clearMarkers() {
+      markers.forEach(m => m.setMap(null));
+      markers = [];
+    }
+
+    // --- 编辑功能（不变） ---
+    let isEditMode = false, pendingData = null;
+
+    document.getElementById('editTrigger').addEventListener('click', () => {
+      if (isEditMode) return;
+      const pwd = prompt('请输入编辑密码：');
+      if (pwd === 000000) {
+        isEditMode = true;
+        editorPanel.classList.add('show');
+      } else if (pwd !== null) {
+        alert('密码错误！');
+      }
+    });
+
+    document.getElementById('closeEditor').addEventListener('click', () => {
+      editorPanel.classList.remove('show');
+      isEditMode = false;
+      pendingData = null;
+      document.getElementById('applyBtn').style.display = 'none';
+      document.getElementById('previewTable').innerHTML = '';
+    });
+
+    document.getElementById('uploadBtn').addEventListener('click', () => {
+      document.getElementById('csvFileInput').click();
+    });
+
+    document.getElementById('csvFileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        const csv = ev.target.result;
+        const parsed = parseCSV(csv);
+        if (parsed.length === 0) {
+          alert('CSV解析失败或为空，请检查格式（姓名,联系方式,大学,大学地址）');
+          return;
+        }
+        pendingData = parsed;
+        showPreview(parsed);
+        document.getElementById('applyBtn').style.display = 'inline-block';
+      };
+      reader.readAsText(file, 'UTF-8');
+    });
+
+    function parseCSV(str) {
+      const lines = str.split('\n').filter(line => line.trim() !== '');
+      if (lines.length < 2) return [];
+      const headers = lines[0].split(',').map(h => h.trim());
+      const nameIdx = headers.findIndex(h => h.includes('姓名'));
+      const contactIdx = headers.findIndex(h => h.includes('联系方式') || h.includes('电话'));
+      const collegeIdx = headers.findIndex(h => h.includes('大学') && !h.includes('地址'));
+      const addrIdx = headers.findIndex(h => h.includes('地址'));
+      if (nameIdx === -1 || addrIdx === -1) {
+        alert('CSV表头必须包含“姓名”和“大学地址”列');
+        return [];
+      }
+      const result = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim());
+        result.push({
+          name: cols[nameIdx] || '',
+          contact: contactIdx !== -1 ? cols[contactIdx] : '',
+          college: collegeIdx !== -1 ? cols[collegeIdx] : '',
+          address: cols[addrIdx] || ''
+        });
+      }
+      return result;
+    }
+
+    function showPreview(data) {
+      let html = '<table><tr><th>姓名</th><th>大学</th><th>地址</th></tr>';
+      data.forEach(item => {
+        html += `<tr><td>${item.name}</td><td>${item.college}</td><td>${item.address}</td></tr>`;
+      });
+      html += '</table>';
+      document.getElementById('previewTable').innerHTML = html;
+    }
+
+    document.getElementById('applyBtn').addEventListener('click', () => {
+      if (pendingData) {
+        classmatesData = pendingData;
+        addMarkersFromData(classmatesData);
+        alert('地图已更新！记得下载新网页文件，替换服务器上的旧文件。');
+      }
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      const newDataStr = JSON.stringify(classmatesData, null, 2);
+      let htmlContent = document.documentElement.outerHTML;
+      const regex = /let classmatesData = \[[\s\S]*?\];/;
+      const replacement = `let classmatesData = ${newDataStr};`;
+      if (regex.test(htmlContent)) {
+        htmlContent = htmlContent.replace(regex, replacement);
+      }
+      const blob = new Blob([htmlContent], {type: 'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'classmates_map.html';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    script.onload = initMap;
+  </script>
+</body>
+</html>
