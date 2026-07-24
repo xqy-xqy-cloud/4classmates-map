@@ -49,7 +49,6 @@
       cursor: default;
       user-select: none;
     }
-    /* 导航按钮样式 */
     .nav-btn {
       display: inline-block;
       padding: 4px 10px;
@@ -66,41 +65,43 @@
 <body>
   <div id="container"></div>
 
-  <div class="hidden-action" id="editTrigger" title="长按3秒进入编辑"> 编辑入口</div>
+  <div class="hidden-action" id="editTrigger" title="点击唤起密码框进入编辑">编辑入口</div>
 
   <div id="editor-panel">
     <span class="close-btn" id="closeEditor">&times;</span>
     <h3>✏️ 编辑同学数据</h3>
     <p class="hint">上传CSV文件批量导入，或手动修改后导出网页</p>
     <input type="file" id="csvFileInput" accept=".csv">
-    <button class="btn btn-primary" id="uploadBtn"> 选择CSV文件</button>
+    <button class="btn btn-primary" id="uploadBtn">选择CSV文件</button>
     <button class="btn btn-success" id="applyBtn" style="display:none;">✅ 应用到地图</button>
-    <button class="btn btn-warning" id="exportBtn"> 下载更新后的网页</button>
+    <button class="btn btn-warning" id="exportBtn">下载更新后的网页</button>
     <div id="previewTable"></div>
   </div>
 
   <script>
-    // 高德 Key 和安全密钥（请替换为你自己的）
+    // 高德密钥替换区（请自行申请替换下方两个值）
     window._AMapSecurityConfig = {
-      securityJsCode: "ed8b9d3491ce1ef0582a9c4ff6afdd01"
+      securityJsCode: "你的高德安全密钥"
     };
-    const AMAP_KEY = "b3662a30f3a5bf6baf306aaf79a04b75";
-
-    const EDIT_PASSWORD = "000000";
+    const AMAP_KEY = "你的高德Web端Key";
+    const EDIT_PASSWORD = "000000"; // 编辑解锁密码
 
     const script = document.createElement('script');
     script.src = `https://webapi.amap.com/v2/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`;
     document.head.appendChild(script);
 
+    // 初始内置数据（可通过CSV导入覆盖）
     let classmatesData = [
-      { name: "张三", contact: "138xxxx", college: "北京大学", address: "北京市海淀区颐和园路5号" },
-      { name: "李四", contact: "139xxxx", college: "复旦大学", address: "上海市杨浦区邯郸路220号" }
+      { name: "张三", contact: "13800000001", college: "北京大学", address: "北京市海淀区颐和园路5号" },
+      { name: "李四", contact: "13900000002", college: "复旦大学", address: "上海市杨浦区邯郸路220号" },
+      { name: "王五", contact: "13600000003", college: "中山大学", address: "广东省广州市海珠区新港西路135号" },
+      { name: "赵六", contact: "13700000004", college: "西安交通大学", address: "陕西省西安市碑林区咸宁西路28号" }
     ];
 
     let map = null, geocoder = null, markers = [];
     let editorPanel = document.getElementById('editor-panel');
 
-    // 生成信息窗口内容（含导航按钮）
+    // 弹窗导航内容
     function generateInfoContent(markerData) {
       const { name, college, contact, address, lng, lat } = markerData;
       const amapUrl = `https://uri.amap.com/navigation?to=${lng},${lat},${encodeURIComponent(name)}&mode=car&coordinate=gaode`;
@@ -109,17 +110,18 @@
       return `
         <div style="padding:8px; min-width:160px;">
           <strong>${name}</strong><br/>
-           ${college}<br/>
-           ${address}<br/>
-           ${contact}<br/>
+         ${college}<br/>
+         ${address}<br/>
+         ${contact}<br/>
           <div style="margin-top:8px;">
-            <a class="nav-btn nav-amap" href="${amapUrl}" target="_blank"> 高德导航</a>
-            <a class="nav-btn nav-baidu" href="${baiduUrl}" target="_blank"> 百度导航</a>
+            <a class="nav-btn nav-amap" href="${amapUrl}" target="_blank">高德导航</a>
+            <a class="nav-btn nav-baidu" href="${baiduUrl}" target="_blank">百度导航</a>
           </div>
         </div>
       `;
     }
 
+    // 初始化地图
     function initMap() {
       map = new AMap.Map('container', {
         zoom: 5,
@@ -135,11 +137,12 @@
       });
     }
 
+    // 批量生成点位标记
     function addMarkersFromData(dataArray) {
       clearMarkers();
       if (!geocoder) return;
       let loadedCount = 0;
-      dataArray.forEach((item, index) => {
+      dataArray.forEach((item) => {
         if (!item.address) {
           loadedCount++;
           return;
@@ -153,7 +156,6 @@
               title: item.name,
               map: map
             });
-            // 保存数据以便生成导航链接
             const markerData = {
               name: item.name,
               college: item.college,
@@ -170,8 +172,6 @@
               infoWindow.open(map, marker.getPosition());
             });
             markers.push(marker);
-
-            // 所有地理编码完成后调整视野
             if (loadedCount === dataArray.length && markers.length > 0) {
               map.setFitView();
             }
@@ -187,13 +187,12 @@
       markers = [];
     }
 
-    // --- 编辑功能（不变） ---
+    // 编辑解锁弹窗（修复密码类型BUG）
     let isEditMode = false, pendingData = null;
-
     document.getElementById('editTrigger').addEventListener('click', () => {
       if (isEditMode) return;
       const pwd = prompt('请输入编辑密码：');
-      if (pwd === 000000) {
+      if (pwd === EDIT_PASSWORD) {
         isEditMode = true;
         editorPanel.classList.add('show');
       } else if (pwd !== null) {
@@ -209,10 +208,10 @@
       document.getElementById('previewTable').innerHTML = '';
     });
 
+    // CSV文件读取
     document.getElementById('uploadBtn').addEventListener('click', () => {
       document.getElementById('csvFileInput').click();
     });
-
     document.getElementById('csvFileInput').addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -231,6 +230,7 @@
       reader.readAsText(file, 'UTF-8');
     });
 
+    // CSV简易解析
     function parseCSV(str) {
       const lines = str.split('\n').filter(line => line.trim() !== '');
       if (lines.length < 2) return [];
@@ -256,6 +256,7 @@
       return result;
     }
 
+    // 表格预览
     function showPreview(data) {
       let html = '<table><tr><th>姓名</th><th>大学</th><th>地址</th></tr>';
       data.forEach(item => {
@@ -265,14 +266,16 @@
       document.getElementById('previewTable').innerHTML = html;
     }
 
+    // 应用CSV数据到地图
     document.getElementById('applyBtn').addEventListener('click', () => {
       if (pendingData) {
         classmatesData = pendingData;
         addMarkersFromData(classmatesData);
-        alert('地图已更新！记得下载新网页文件，替换服务器上的旧文件。');
+        alert('地图已更新！下载新网页文件替换原有文件即可同步给所有人');
       }
     });
 
+    // 导出新版HTML文件
     document.getElementById('exportBtn').addEventListener('click', () => {
       const newDataStr = JSON.stringify(classmatesData, null, 2);
       let htmlContent = document.documentElement.outerHTML;
