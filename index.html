@@ -80,11 +80,12 @@
 
   <script>
     // 高德密钥替换区（请自行申请替换下方两个值）
+    // NOTE: It's better to avoid committing API keys to a public repo. Replace these values before deployment.
     window._AMapSecurityConfig = {
       securityJsCode: "b3662a30f3a5bf6baf306aaf79a04b75"
     };
     const AMAP_KEY = "ed8b9d3491ce1ef0582a9c4ff6afdd01";
-    const EDIT_PASSWORD = "123456"; // 编辑解锁密码
+    const EDIT_PASSWORD = "123456"; // 编辑解锁密码 (建议移到安全的后端或在部署前修改)
 
     const script = document.createElement('script');
     script.src = `https://webapi.amap.com/v2/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`;
@@ -101,27 +102,43 @@
     let map = null, geocoder = null, markers = [];
     let editorPanel = document.getElementById('editor-panel');
 
-    // 弹窗导航内容
+    // 简单的 HTML 转义以防 XSS
+    function escapeHTML(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // 弹窗导航内容 (使用转义后的字段并添加 rel="noopener")
     function generateInfoContent(markerData) {
       const { name, college, contact, address, lng, lat } = markerData;
+      const safeName = escapeHTML(name);
+      const safeCollege = escapeHTML(college);
+      const safeAddress = escapeHTML(address);
+      const safeContact = escapeHTML(contact);
+
       const amapUrl = `https://uri.amap.com/navigation?to=${lng},${lat},${encodeURIComponent(name)}&mode=car&coordinate=gaode`;
       const baiduUrl = `https://api.map.baidu.com/direction?destination=${lat},${lng}&coord_type=gcj02&mode=driving&output=html&src=classmap`;
-      
+
       return `
         <div style="padding:8px; min-width:160px;">
-          <strong>${name}</strong><br/>
-         ${college}<br/>
-         ${address}<br/>
-         ${contact}<br/>
+          <strong>${safeName}</strong><br/>
+         ${safeCollege}<br/>
+         ${safeAddress}<br/>
+         ${safeContact}<br/>
           <div style="margin-top:8px;">
-            <a class="nav-btn nav-amap" href="${amapUrl}" target="_blank">高德导航</a>
-            <a class="nav-btn nav-baidu" href="${baiduUrl}" target="_blank">百度导航</a>
+            <a class="nav-btn nav-amap" href="${amapUrl}" target="_blank" rel="noopener">高德导航</a>
+            <a class="nav-btn nav-baidu" href="${baiduUrl}" target="_blank" rel="noopener">百度导航</a>
           </div>
         </div>
       `;
     }
 
-    // 初始化地图
+    // 初���化地图
     function initMap() {
       map = new AMap.Map('container', {
         zoom: 5,
@@ -149,7 +166,7 @@
         }
         geocoder.getLocation(item.address, (status, result) => {
           loadedCount++;
-          if (status === 'complete' && result.geocodes.length > 0) {
+          if (status === 'complete' && result.geocodes && result.geocodes.length > 0) {
             const lnglat = result.geocodes[0].location;
             const marker = new AMap.Marker({
               position: [lnglat.lng, lnglat.lat],
@@ -192,10 +209,11 @@
     document.getElementById('editTrigger').addEventListener('click', () => {
       if (isEditMode) return;
       const pwd = prompt('请输入编辑密码：');
-      if (pwd === 123456) {
+      if (pwd === null) return; // 用户取消
+      if (pwd === EDIT_PASSWORD) {
         isEditMode = true;
         editorPanel.classList.add('show');
-      } else if (pwd !== null) {
+      } else {
         alert('密码错误！');
       }
     });
@@ -230,37 +248,79 @@
       reader.readAsText(file, 'UTF-8');
     });
 
-    // CSV简易解析
+    // 改进的 CSV 解析（支持双引号包含、CRLF）
+    // 对于更完整的解析，建议使用 PapaParse（https://www.papaparse.com/）
     function parseCSV(str) {
-      const lines = str.split('\n').filter(line => line.trim() !== '');
-      if (lines.length < 2) return [];
-      const headers = lines[0].split(',').map(h => h.trim());
-      const nameIdx = headers.findIndex(h => h.includes('姓名'));
-      const contactIdx = headers.findIndex(h => h.includes('联系方式') || h.includes('电话'));
-      const collegeIdx = headers.findIndex(h => h.includes('大学') && !h.includes('地址'));
-      const addrIdx = headers.findIndex(h => h.includes('地址'));
+      if (!str) return [];
+      // 移除可能的 BOM
+      if (str.charCodeAt(0) === 0xFEFF) str = str.slice(1);
+      // 规范换行
+      const text = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      const rows = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '"') {
+          // 处理转义的双引号
+          if (inQuotes && text[i+1] === '"') {
+            cur += '"';
+            i++; // 跳过转义引号
+          } else {
+            inQuotes = !inQuotes;
+          }
+          continue;
+        }
+        if (ch === '\n' && !inQuotes) {
+          rows.push(cur);
+          cur = '';
+          continue;
+        }
+        cur += ch;
+      }
+      if (cur !== '') rows.push(cur);
+      if (rows.length < 1) return [];
+
+      const headers = rows[0].split(',').map(h => h.trim());
+      const nameIdx = headers.findIndex(h => /姓名/.test(h));
+      const contactIdx = headers.findIndex(h => /联系方式|电话/.test(h));
+      const collegeIdx = headers.findIndex(h => /大学(?!.*地址)/.test(h));
+      const addrIdx = headers.findIndex(h => /地址/.test(h));
       if (nameIdx === -1 || addrIdx === -1) {
         alert('CSV表头必须包含“姓名”和“大学地址”列');
         return [];
       }
+
       const result = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim());
+      for (let i = 1; i < rows.length; i++) {
+        const line = rows[i];
+        const row = [];
+        let cell = '';
+        let q = false;
+        for (let k = 0; k < line.length; k++) {
+          const c = line[k];
+          if (c === '"') { q = !q; continue; }
+          if (c === ',' && !q) { row.push(cell.trim()); cell = ''; continue; }
+          cell += c;
+        }
+        row.push(cell.trim());
+
         result.push({
-          name: cols[nameIdx] || '',
-          contact: contactIdx !== -1 ? cols[contactIdx] : '',
-          college: collegeIdx !== -1 ? cols[collegeIdx] : '',
-          address: cols[addrIdx] || ''
+          name: row[nameIdx] || '',
+          contact: contactIdx !== -1 ? (row[contactIdx] || '') : '',
+          college: collegeIdx !== -1 ? (row[collegeIdx] || '') : '',
+          address: row[addrIdx] || ''
         });
       }
       return result;
     }
 
-    // 表格预览
+    // 表格预览（对内容做转义以防 XSS）
     function showPreview(data) {
       let html = '<table><tr><th>姓名</th><th>大学</th><th>地址</th></tr>';
       data.forEach(item => {
-        html += `<tr><td>${item.name}</td><td>${item.college}</td><td>${item.address}</td></tr>`;
+        html += `<tr><td>${escapeHTML(item.name)}</td><td>${escapeHTML(item.college)}</td><td>${escapeHTML(item.address)}</td></tr>`;
       });
       html += '</table>';
       document.getElementById('previewTable').innerHTML = html;
@@ -275,11 +335,11 @@
       }
     });
 
-    // 导出新版HTML文件
+    // 导出新版HTML文件（更鲁棒的正则替换）
     document.getElementById('exportBtn').addEventListener('click', () => {
       const newDataStr = JSON.stringify(classmatesData, null, 2);
       let htmlContent = document.documentElement.outerHTML;
-      const regex = /let classmatesData = \[[\s\S]*?\];/;
+      const regex = /let\s+classmatesData\s*=\s*\[[\s\S]*?\]\s*;/;
       const replacement = `let classmatesData = ${newDataStr};`;
       if (regex.test(htmlContent)) {
         htmlContent = htmlContent.replace(regex, replacement);
