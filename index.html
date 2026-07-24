@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>班级蹭饭地图</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -60,6 +60,33 @@
     }
     .nav-amap { background: #0091ff; }
     .nav-baidu { background: #3385ff; }
+
+    /* Simple password modal */
+    #password-modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    #password-modal {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      width: 320px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    #password-modal input[type="password"] {
+      width: calc(100% - 12px);
+      padding: 6px;
+      margin-top: 8px;
+      margin-bottom: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    #password-modal .actions { text-align: right; }
   </style>
 </head>
 <body>
@@ -67,20 +94,34 @@
 
   <div class="hidden-action" id="editTrigger" title="点击唤起密码框进入编辑">编辑入口</div>
 
-  <div id="editor-panel">
-    <span class="close-btn" id="closeEditor">&times;</span>
+  <div id="editor-panel" role="dialog" aria-label="编辑同学数据面板">
+    <span class="close-btn" id="closeEditor" title="关闭编辑面板">&times;</span>
     <h3>✏️ 编辑同学数据</h3>
     <p class="hint">上传CSV文件批量导入，或手动修改后导出网页</p>
     <input type="file" id="csvFileInput" accept=".csv">
     <button class="btn btn-primary" id="uploadBtn">选择CSV文件</button>
     <button class="btn btn-success" id="applyBtn" style="display:none;">✅ 应用到地图</button>
     <button class="btn btn-warning" id="exportBtn">下载更新后的网页</button>
-    <div id="previewTable"></div>
+    <div id="previewTable" aria-live="polite"></div>
+  </div>
+
+  <!-- Password modal (hidden by default) -->
+  <div id="password-modal-backdrop" aria-hidden="true">
+    <div id="password-modal" role="dialog" aria-label="输入编辑密码">
+      <div>
+        <strong>请输入编辑密码</strong>
+      </div>
+      <input id="passwordInput" type="password" autocomplete="off" placeholder="密码">
+      <div class="actions">
+        <button class="btn btn-primary" id="passwordConfirm">确定</button>
+        <button class="btn" id="passwordCancel">取消</button>
+      </div>
+    </div>
   </div>
 
   <script>
     // 高德密钥替换区（请自行申请替换下方两个值）
-    // NOTE: It's better to avoid committing API keys to a public repo. Replace these values before deployment.
+    // WARNING: Avoid committing API keys to public repos. Move keys to server-side config or inject at deploy time.
     window._AMapSecurityConfig = {
       securityJsCode: "b3662a30f3a5bf6baf306aaf79a04b75"
     };
@@ -91,13 +132,14 @@
     script.src = `https://webapi.amap.com/v2/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Geocoder,AMap.Scale,AMap.ToolBar`;
     document.head.appendChild(script);
 
-    // 初始内置数据（可通过CSV导入覆盖）
+    // CLASSMATES_DATA_START
     let classmatesData = [
       { name: "张三", contact: "13800000001", college: "北京大学", address: "北京市海淀区颐和园路5号" },
       { name: "李四", contact: "13900000002", college: "复旦大学", address: "上海市杨浦区邯郸路220号" },
       { name: "王五", contact: "13600000003", college: "中山大学", address: "广东省广州市海珠区新港西路135号" },
       { name: "赵六", contact: "13700000004", college: "西安交通大学", address: "陕西省西安市碑林区咸宁西路28号" }
     ];
+    // CLASSMATES_DATA_END
 
     let map = null, geocoder = null, markers = [];
     let editorPanel = document.getElementById('editor-panel');
@@ -138,7 +180,7 @@
       `;
     }
 
-    // 初���化地图
+    // 初始化地图
     function initMap() {
       map = new AMap.Map('container', {
         zoom: 5,
@@ -204,13 +246,33 @@
       markers = [];
     }
 
-    // 编辑解锁弹窗（修复密码类型BUG）
+    // Password modal handling (replacing prompt-based flow)
     let isEditMode = false, pendingData = null;
-    document.getElementById('editTrigger').addEventListener('click', () => {
+    const editTrigger = document.getElementById('editTrigger');
+    const backdrop = document.getElementById('password-modal-backdrop');
+    const pwdInput = document.getElementById('passwordInput');
+    const pwdConfirm = document.getElementById('passwordConfirm');
+    const pwdCancel = document.getElementById('passwordCancel');
+
+    editTrigger.addEventListener('click', () => {
       if (isEditMode) return;
-      const pwd = prompt('请输入编辑密码：');
-      if (pwd === null) return; // 用户取消
-      if (pwd === EDIT_PASSWORD) {
+      backdrop.style.display = 'flex';
+      backdrop.setAttribute('aria-hidden', 'false');
+      pwdInput.value = '';
+      setTimeout(() => pwdInput.focus(), 50);
+    });
+
+    pwdCancel.addEventListener('click', () => {
+      backdrop.style.display = 'none';
+      backdrop.setAttribute('aria-hidden', 'true');
+    });
+
+    pwdConfirm.addEventListener('click', () => {
+      const val = pwdInput.value;
+      backdrop.style.display = 'none';
+      backdrop.setAttribute('aria-hidden', 'true');
+      if (val === '') return;
+      if (val === EDIT_PASSWORD) {
         isEditMode = true;
         editorPanel.classList.add('show');
       } else {
@@ -248,25 +310,27 @@
       reader.readAsText(file, 'UTF-8');
     });
 
-    // 改进的 CSV 解析（支持双引号包含、CRLF）
+    // 更鲁棒的 CSV 解析（支持双引号包含、转义双引号、CRLF）
     // 对于更完整的解析，建议使用 PapaParse（https://www.papaparse.com/）
     function parseCSV(str) {
       if (!str) return [];
       // 移除可能的 BOM
       if (str.charCodeAt(0) === 0xFEFF) str = str.slice(1);
       // 规范换行
-      const text = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      str = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
+      // 将整个文本解析成行（遵循 CSV 引号规则）
       const rows = [];
       let cur = '';
       let inQuotes = false;
-      for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        const next = str[i+1];
         if (ch === '"') {
-          // 处理转义的双引号
-          if (inQuotes && text[i+1] === '"') {
+          if (inQuotes && next === '"') {
+            // 双引号转义 -> 添加一个引号并跳过下一个
             cur += '"';
-            i++; // 跳过转义引号
+            i++;
           } else {
             inQuotes = !inQuotes;
           }
@@ -280,37 +344,56 @@
         cur += ch;
       }
       if (cur !== '') rows.push(cur);
-      if (rows.length < 1) return [];
 
-      const headers = rows[0].split(',').map(h => h.trim());
-      const nameIdx = headers.findIndex(h => /姓名/.test(h));
-      const contactIdx = headers.findIndex(h => /联系方式|电话/.test(h));
-      const collegeIdx = headers.findIndex(h => /大学(?!.*地址)/.test(h));
-      const addrIdx = headers.findIndex(h => /地址/.test(h));
+      if (rows.length === 0) return [];
+
+      // 将单行拆分为单元格（统一处理引号与转义）
+      function splitRow(line) {
+        const cells = [];
+        let cell = '';
+        let q = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          const next = line[i+1];
+          if (ch === '"') {
+            if (q && next === '"') {
+              cell += '"';
+              i++;
+            } else {
+              q = !q;
+            }
+            continue;
+          }
+          if (ch === ',' && !q) {
+            cells.push(cell);
+            cell = '';
+            continue;
+          }
+          cell += ch;
+        }
+        cells.push(cell);
+        return cells;
+      }
+
+      const headerFields = splitRow(rows[0]).map(h => h.trim());
+      const nameIdx = headerFields.findIndex(h => /姓名/.test(h));
+      const contactIdx = headerFields.findIndex(h => /联系方式|电话/.test(h));
+      const collegeIdx = headerFields.findIndex(h => /大学(?!.*地址)/.test(h));
+      const addrIdx = headerFields.findIndex(h => /地址/.test(h));
       if (nameIdx === -1 || addrIdx === -1) {
         alert('CSV表头必须包含“姓名”和“大学地址”列');
         return [];
       }
 
       const result = [];
-      for (let i = 1; i < rows.length; i++) {
-        const line = rows[i];
-        const row = [];
-        let cell = '';
-        let q = false;
-        for (let k = 0; k < line.length; k++) {
-          const c = line[k];
-          if (c === '"') { q = !q; continue; }
-          if (c === ',' && !q) { row.push(cell.trim()); cell = ''; continue; }
-          cell += c;
-        }
-        row.push(cell.trim());
-
+      for (let r = 1; r < rows.length; r++) {
+        if (rows[r].trim() === '') continue;
+        const cells = splitRow(rows[r]).map(c => c.trim());
         result.push({
-          name: row[nameIdx] || '',
-          contact: contactIdx !== -1 ? (row[contactIdx] || '') : '',
-          college: collegeIdx !== -1 ? (row[collegeIdx] || '') : '',
-          address: row[addrIdx] || ''
+          name: cells[nameIdx] || '',
+          contact: contactIdx !== -1 ? (cells[contactIdx] || '') : '',
+          college: collegeIdx !== -1 ? (cells[collegeIdx] || '') : '',
+          address: cells[addrIdx] || ''
         });
       }
       return result;
@@ -335,15 +418,34 @@
       }
     });
 
-    // 导出新版HTML文件（更鲁棒的正则替换）
+    // 导出新版HTML文件（使用明确的开始/结束标记以避免错误替换）
     document.getElementById('exportBtn').addEventListener('click', () => {
       const newDataStr = JSON.stringify(classmatesData, null, 2);
       let htmlContent = document.documentElement.outerHTML;
-      const regex = /let\s+classmatesData\s*=\s*\[[\s\S]*?\]\s*;/;
-      const replacement = `let classmatesData = ${newDataStr};`;
-      if (regex.test(htmlContent)) {
-        htmlContent = htmlContent.replace(regex, replacement);
+
+      const startMarker = '/* CLASSMATES_DATA_START */';
+      const endMarker = '/* CLASSMATES_DATA_END */';
+
+      // 使用正则安全替换 startMarker 和 endMarker 之间的内容
+      const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const markerRegex = new RegExp(esc(startMarker) + '[\\s\\S]*?' + esc(endMarker), 'm');
+
+      const replacement = startMarker + '\nlet classmatesData = ' + newDataStr + ';\n' + endMarker;
+
+      if (markerRegex.test(htmlContent)) {
+        htmlContent = htmlContent.replace(markerRegex, replacement);
+      } else {
+        // 兜底：如果没有找到标记，仍进行旧式替换以兼容老版本
+        const legacyRegex = /let\s+classmatesData\s*=\s*\[[\s\S]*?\]\s*;/;
+        if (legacyRegex.test(htmlContent)) {
+          htmlContent = htmlContent.replace(legacyRegex, replacement);
+        } else {
+          // 无法找到可替换位置：提示并不导出
+          alert('导出失败：找不到数据区域进行替换。请确保页面包含 CLASSMATES_DATA_START/END 标记。');
+          return;
+        }
       }
+
       const blob = new Blob([htmlContent], {type: 'text/html'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
